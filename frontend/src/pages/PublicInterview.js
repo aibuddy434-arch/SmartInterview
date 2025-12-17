@@ -41,6 +41,8 @@ const PublicInterview = () => {
   const [timePerQuestion, setTimePerQuestion] = useState(null); // Seconds per question from config
   const [interviewStartTime, setInterviewStartTime] = useState(null); // When interview started
   const [isTimerActive, setIsTimerActive] = useState(false); // Whether timer is counting down
+  const [isTimerPaused, setIsTimerPaused] = useState(true); // Timer paused during TTS/prep
+  const [isSpeaking, setIsSpeaking] = useState(false); // Is avatar currently speaking?
   // --- End Timer State ---
 
   const [isRecording, setIsRecording] = useState(false);
@@ -53,6 +55,12 @@ const PublicInterview = () => {
   const [permissionError, setPermissionError] = useState(null);
   const [requestingPermissions, setRequestingPermissions] = useState(false);
 
+  // --- Live Transcript State ---
+  const [liveTranscript, setLiveTranscript] = useState('');
+  const [interimTranscript, setInterimTranscript] = useState('');
+  const speechRecognitionRef = useRef(null);
+  // --- End Live Transcript State ---
+
   // --- Refs ---
   const videoRef = useRef(null);
   const mediaRecorderRef = useRef(null);
@@ -62,6 +70,7 @@ const PublicInterview = () => {
   const autoSubmitTriggeredRef = useRef(false); // Prevent double auto-submit
   const startRecordingRef = useRef(null); // Ref for auto-start recording
   const startQuestionTimerRef = useRef(null); // Ref for starting timer after TTS
+  const hasAskedFirstQuestionRef = useRef(false); // Prevent Q1 double-ask
 
   // --- Core Functions (wrapped in useCallback) ---
 
@@ -74,11 +83,18 @@ const PublicInterview = () => {
       console.warn('Empty question text provided.');
       return;
     }
-    console.log("Attempting to ask question:", questionText);
+
+    console.log("[ASK] Starting to ask question:", questionText);
+
+    // PAUSE timer while speaking
+    setIsSpeaking(true);
+    setIsTimerPaused(true);
+
     try {
       const audioBlob = await aiService.generateTTS(questionText);
       if (!audioBlob) {
         toast.error('Could not generate speech audio.');
+        setIsSpeaking(false);
         return;
       }
       const audioUrl = URL.createObjectURL(audioBlob);
@@ -86,11 +102,24 @@ const PublicInterview = () => {
 
       audio.onended = () => {
         URL.revokeObjectURL(audioUrl);
-        console.log("Avatar finished speaking. Starting timer and recording...");
+        console.log("[ASK] Avatar finished speaking. Prep time starting...");
+        setIsSpeaking(false);
 
-        // Start timer and recording after TTS finishes + 2 sec prep time
+        // Show prep time toast
+        toast("💡 Prepare your answer...", {
+          icon: '⏱️',
+          duration: 2000,
+          style: { background: '#FFF3CD', color: '#856404' }
+        });
+
+        // After 2 sec prep time: start timer and recording
         setTimeout(() => {
-          // Start the question timer NOW (after TTS + prep time)
+          console.log("[ASK] Prep time over. Starting timer and recording!");
+
+          // RESUME timer
+          setIsTimerPaused(false);
+
+          // Start the question timer NOW
           if (startQuestionTimerRef.current) {
             console.log("[TIMER] Starting question timer now");
             startQuestionTimerRef.current();
@@ -108,18 +137,23 @@ const PublicInterview = () => {
           }
         }, 2000); // 2 second prep time after question is spoken
       };
+
       audio.onerror = (e) => {
         console.error('Audio playback error:', e);
         toast.error('An error occurred during audio playback.');
         URL.revokeObjectURL(audioUrl);
+        setIsSpeaking(false);
+        setIsTimerPaused(false);
       };
 
       await audio.play();
-      console.log("Audio should be playing now.");
+      console.log("[ASK] Audio playing now.");
 
     } catch (error) {
       console.error('Failed to ask question:', error);
       toast.error('A critical error occurred while trying to ask the question.');
+      setIsSpeaking(false);
+      setIsTimerPaused(false);
     }
   }, [avatarElement, isRecording]);
 
@@ -294,8 +328,8 @@ const PublicInterview = () => {
           setCurrentQuestionText(question_text);
           setCurrentQuestionType('Preset');
 
-          // Reset question timer for new question
-          startQuestionTimer();
+          // Timer will start after TTS finishes in askQuestion() - don't start here
+          resetQuestionTimer(); // Just reset the display
 
           setTimeout(() => {
             if (question_text) {
@@ -311,8 +345,8 @@ const PublicInterview = () => {
           setCurrentQuestionText(question_text);
           setCurrentQuestionType(action === 'follow_up' ? 'Follow-up' : 'From Resume');
 
-          // Reset question timer for new question
-          startQuestionTimer();
+          // Timer will start after TTS finishes in askQuestion() - don't start here
+          resetQuestionTimer(); // Just reset the display
 
           setTimeout(() => {
             if (question_text) {
@@ -335,7 +369,7 @@ const PublicInterview = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [audioResponse, sessionId, currentQuestionIndex, askQuestion, setCurrentQuestionText, setCurrentQuestionType, setTotalQuestionsAsked, startQuestionTimer]);
+  }, [audioResponse, sessionId, currentQuestionIndex, askQuestion, setCurrentQuestionText, setCurrentQuestionType, setTotalQuestionsAsked, resetQuestionTimer]);
 
   // Keep ref updated with latest submitResponse for auto-submit
   useEffect(() => {
@@ -457,13 +491,19 @@ const PublicInterview = () => {
       audioChunksRef.current = [];
       setAudioResponse(null);
 
+      // Reset live transcript for new recording
+      setLiveTranscript('');
+      setInterimTranscript('');
+
       mediaRecorderRef.current.ondataavailable = (event) => {
         if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/wav' });
+        // Use the actual MIME type from MediaRecorder
+        const mimeType = mediaRecorderRef.current.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
         setAudioResponse(audioBlob);
-        console.log('Recording stopped, audio blob ready.');
+        console.log('Recording stopped, audio blob ready. MIME type:', mimeType);
       };
       mediaRecorderRef.current.onerror = (event) => {
         console.error('MediaRecorder error:', event.error);
@@ -472,18 +512,88 @@ const PublicInterview = () => {
       }
       mediaRecorderRef.current.start();
       setIsRecording(true);
+
+      // --- Start Speech Recognition for Live Transcript ---
+      try {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+          const recognition = new SpeechRecognition();
+          recognition.continuous = true;
+          recognition.interimResults = true;
+          recognition.lang = 'en-US';
+
+          recognition.onresult = (event) => {
+            let interim = '';
+            let final = '';
+
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const transcript = event.results[i][0].transcript;
+              if (event.results[i].isFinal) {
+                final += transcript + ' ';
+              } else {
+                interim += transcript;
+              }
+            }
+
+            if (final) {
+              setLiveTranscript(prev => prev + final);
+            }
+            setInterimTranscript(interim);
+          };
+
+          recognition.onerror = (event) => {
+            console.warn('Speech recognition error:', event.error);
+            // Don't show error toast - continue without live transcript
+          };
+
+          recognition.onend = () => {
+            // Restart if still recording
+            if (isRecording && speechRecognitionRef.current) {
+              try {
+                speechRecognitionRef.current.start();
+              } catch (e) {
+                // Already started or stopped
+              }
+            }
+          };
+
+          speechRecognitionRef.current = recognition;
+          recognition.start();
+          console.log('[Speech Recognition] Started for live transcript');
+        } else {
+          console.warn('Web Speech API not supported in this browser');
+        }
+      } catch (speechError) {
+        console.warn('Failed to start speech recognition:', speechError);
+        // Continue without live transcript
+      }
+      // --- End Speech Recognition ---
+
     } catch (error) {
       console.error('Failed to start recording:', error);
       toast.error('Failed to start recording.');
       setIsRecording(false);
     }
-  }, [mediaStream]);
+  }, [mediaStream, isRecording]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     }
+
+    // Stop speech recognition
+    if (speechRecognitionRef.current) {
+      try {
+        speechRecognitionRef.current.stop();
+        speechRecognitionRef.current = null;
+        console.log('[Speech Recognition] Stopped');
+      } catch (e) {
+        // Already stopped
+      }
+    }
+    // Clear interim transcript (keep final transcript)
+    setInterimTranscript('');
   }, [isRecording]);
 
   // Keep startRecordingRef updated for auto-start recording
@@ -534,16 +644,25 @@ const PublicInterview = () => {
 
   // --- FIX 2: Update "First Question" useEffect ---
   useEffect(() => {
-    console.log(`[Q1 Effect Check] Step: ${step}, Avatar Ready: ${!!avatarElement}, Interview Ready: ${!!interview}, QIndex: ${currentQuestionIndex}`);
+    console.log(`[Q1 Effect Check] Step: ${step}, Avatar Ready: ${!!avatarElement}, Interview Ready: ${!!interview}, QIndex: ${currentQuestionIndex}, AlreadyAsked: ${hasAskedFirstQuestionRef.current}`);
+
+    // Check if we've already asked Q1 (prevents double-ask bug)
+    if (hasAskedFirstQuestionRef.current) {
+      console.log("[Q1 Effect] Skipping - already asked first question");
+      return;
+    }
 
     if (step === 'interview' && avatarElement && interview?.questions?.length > 0 && currentQuestionIndex === 0) {
 
       const firstQuestionText = interview.questions[0].text;
       console.log("[Q1 Effect Triggered] Conditions met! Asking Question 1...");
 
+      // Mark as asked BEFORE asking to prevent race conditions
+      hasAskedFirstQuestionRef.current = true;
+
       setCurrentQuestionText(firstQuestionText);
-      setTotalQuestionsAsked(1); // Set total Q's to 1
-      setCurrentQuestionType('Preset'); // Set type
+      setTotalQuestionsAsked(1);
+      setCurrentQuestionType('Preset');
 
       const timer = setTimeout(() => {
         askQuestion(firstQuestionText);
@@ -556,8 +675,7 @@ const PublicInterview = () => {
       else if (!interview?.questions?.length > 0) console.log("[Q1 Effect] Not running: Interview/Questions not loaded.");
       else if (currentQuestionIndex !== 0) console.log("[Q1 Effect] Not running: Not the first question.");
     }
-    // Add new state setters to dependency array
-  }, [step, avatarElement, interview, currentQuestionIndex, askQuestion, setCurrentQuestionText, setTotalQuestionsAsked, setCurrentQuestionType]);
+  }, [step, avatarElement, interview, currentQuestionIndex, askQuestion]);
   // --- End Fix 2 ---
 
   useEffect(() => {
@@ -584,32 +702,50 @@ const PublicInterview = () => {
 
   // --- Timer Effects ---
 
-  // Initialize timers when interview starts
+  // Initialize timer values when interview starts (but don't start counting yet)
   useEffect(() => {
     if (step === 'interview' && interview?.time_per_question_seconds) {
-      console.log("[Timer] Initializing timers...");
+      console.log("[Timer] Initializing timer values...");
       setTimePerQuestion(interview.time_per_question_seconds);
       setQuestionTimeRemaining(interview.time_per_question_seconds);
       setTotalTimeRemaining(interview.total_time_seconds);
       setInterviewStartTime(Date.now());
       setIsTimerActive(true);
-
-      // Start the total interview timer
-      totalTimerRef.current = setInterval(() => {
-        setTotalTimeRemaining(prev => {
-          if (prev <= 1) {
-            clearInterval(totalTimerRef.current);
-            totalTimerRef.current = null;
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-
-      // NOTE: Question timer is now started by askQuestion AFTER TTS finishes
-      // This ensures timer doesn't start while question is being spoken
+      setIsTimerPaused(true); // Start paused until first question is asked
     }
   }, [step, interview?.time_per_question_seconds, interview?.total_time_seconds]);
+
+  // Total interview timer - only counts down when NOT paused
+  useEffect(() => {
+    if (!isTimerActive || isTimerPaused) {
+      // Timer is paused or not active - clear any existing interval
+      if (totalTimerRef.current) {
+        clearInterval(totalTimerRef.current);
+        totalTimerRef.current = null;
+      }
+      return;
+    }
+
+    // Timer is active and NOT paused - start counting
+    console.log("[Timer] Total timer RUNNING");
+    totalTimerRef.current = setInterval(() => {
+      setTotalTimeRemaining(prev => {
+        if (prev <= 1) {
+          clearInterval(totalTimerRef.current);
+          totalTimerRef.current = null;
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (totalTimerRef.current) {
+        clearInterval(totalTimerRef.current);
+        totalTimerRef.current = null;
+      }
+    };
+  }, [isTimerActive, isTimerPaused]);
 
   // Handle question timer reaching 0 - auto submit
   useEffect(() => {
@@ -953,6 +1089,43 @@ const PublicInterview = () => {
                 </CardBody>
               </Card>
               {/* --- End Fix 2 --- */}
+
+              {/* --- Live Transcript Panel --- */}
+              <Card className={isRecording ? 'border-green-500 border-2' : ''}>
+                <CardHeader>
+                  <h3 className="text-lg font-semibold flex items-center">
+                    <Mic className={`h-5 w-5 mr-2 ${isRecording ? 'text-green-500 animate-pulse' : 'text-gray-400'}`} />
+                    Your Response (Live)
+                    {isRecording && (
+                      <span className="ml-2 px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">
+                        Recording...
+                      </span>
+                    )}
+                  </h3>
+                </CardHeader>
+                <CardBody>
+                  <div className="min-h-[100px] max-h-[200px] overflow-y-auto bg-gray-50 rounded-lg p-4 border">
+                    {(liveTranscript || interimTranscript) ? (
+                      <p className="text-gray-700 leading-relaxed">
+                        {liveTranscript}
+                        <span className="text-gray-400 italic">{interimTranscript}</span>
+                      </p>
+                    ) : (
+                      <p className="text-gray-400 italic text-center">
+                        {isRecording
+                          ? "Start speaking to see your transcript..."
+                          : "Click 'Start Recording' and speak to see your response here"}
+                      </p>
+                    )}
+                  </div>
+                  {(liveTranscript || interimTranscript) && (
+                    <p className="text-xs text-gray-500 mt-2">
+                      💡 This is a preview. Your actual response will be transcribed by the server after submission.
+                    </p>
+                  )}
+                </CardBody>
+              </Card>
+              {/* --- End Live Transcript Panel --- */}
             </div>
 
             {/* Candidate Video and Controls */}
@@ -1018,40 +1191,72 @@ const PublicInterview = () => {
 
               {/* --- Timer Display Card --- */}
               {(timePerQuestion || totalTimeRemaining) && (
-                <Card className={`${questionTimeRemaining !== null && questionTimeRemaining <= 30 ? 'border-red-500 border-2' : ''}`}>
+                <Card className={`${isTimerPaused
+                  ? 'border-purple-500 border-2 bg-purple-50'
+                  : questionTimeRemaining !== null && questionTimeRemaining <= 30
+                    ? 'border-red-500 border-2'
+                    : ''
+                  }`}>
                   <CardHeader>
-                    <h3 className="text-lg font-semibold flex items-center">
-                      <Clock className="h-5 w-5 mr-2" />
-                      Time Remaining
+                    <h3 className="text-lg font-semibold flex items-center justify-between">
+                      <span className="flex items-center">
+                        <Clock className="h-5 w-5 mr-2" />
+                        Time Remaining
+                      </span>
+                      {/* Timer Status Badge */}
+                      {isTimerPaused ? (
+                        <span className="px-3 py-1 bg-purple-100 text-purple-700 text-sm rounded-full flex items-center">
+                          {isSpeaking ? '🔊 Listening...' : '⏸️ Paused'}
+                        </span>
+                      ) : (
+                        <span className="px-3 py-1 bg-green-100 text-green-700 text-sm rounded-full flex items-center">
+                          🎤 Recording
+                        </span>
+                      )}
                     </h3>
                   </CardHeader>
                   <CardBody>
+                    {/* Speaking/Prep Message */}
+                    {isTimerPaused && (
+                      <div className="mb-4 p-3 bg-purple-100 rounded-lg text-center">
+                        {isSpeaking ? (
+                          <p className="text-purple-700 font-medium">🔊 Listen to the question...</p>
+                        ) : (
+                          <p className="text-purple-700 font-medium">💡 Prepare your answer...</p>
+                        )}
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4">
                       {/* Question Timer */}
                       <div className="text-center">
                         <p className="text-sm text-gray-500 mb-1">This Question</p>
-                        <p className={`text-3xl font-bold ${questionTimeRemaining !== null && questionTimeRemaining <= 30
-                          ? 'text-red-600 animate-pulse'
-                          : questionTimeRemaining !== null && questionTimeRemaining <= 60
-                            ? 'text-orange-500'
-                            : 'text-blue-600'
+                        <p className={`text-3xl font-bold ${isTimerPaused
+                          ? 'text-purple-600'
+                          : questionTimeRemaining !== null && questionTimeRemaining <= 30
+                            ? 'text-red-600 animate-pulse'
+                            : questionTimeRemaining !== null && questionTimeRemaining <= 60
+                              ? 'text-orange-500'
+                              : 'text-blue-600'
                           }`}>
                           {formatTime(questionTimeRemaining)}
                         </p>
-                        {questionTimeRemaining !== null && questionTimeRemaining <= 30 && (
+                        {!isTimerPaused && questionTimeRemaining !== null && questionTimeRemaining <= 30 && (
                           <p className="text-xs text-red-500 mt-1">Hurry! Time almost up!</p>
                         )}
                       </div>
                       {/* Total Timer */}
                       <div className="text-center">
                         <p className="text-sm text-gray-500 mb-1">Total Interview</p>
-                        <p className={`text-3xl font-bold ${totalTimeRemaining !== null && totalTimeRemaining <= 60
-                          ? 'text-red-600'
-                          : 'text-green-600'
+                        <p className={`text-3xl font-bold ${isTimerPaused
+                          ? 'text-purple-600'
+                          : totalTimeRemaining !== null && totalTimeRemaining <= 60
+                            ? 'text-red-600'
+                            : 'text-green-600'
                           }`}>
                           {formatTime(totalTimeRemaining)}
                         </p>
-                        {totalTimeRemaining !== null && totalTimeRemaining <= 60 && (
+                        {!isTimerPaused && totalTimeRemaining !== null && totalTimeRemaining <= 60 && (
                           <p className="text-xs text-red-500 mt-1">Interview ending soon!</p>
                         )}
                       </div>
@@ -1061,7 +1266,11 @@ const PublicInterview = () => {
                       <div className="mt-4">
                         <div className="w-full bg-gray-200 rounded-full h-2">
                           <div
-                            className={`h-2 rounded-full transition-all duration-1000 ${questionTimeRemaining <= 30 ? 'bg-red-500' : 'bg-blue-500'
+                            className={`h-2 rounded-full transition-all duration-1000 ${isTimerPaused
+                              ? 'bg-purple-500'
+                              : questionTimeRemaining <= 30
+                                ? 'bg-red-500'
+                                : 'bg-blue-500'
                               }`}
                             style={{ width: `${(questionTimeRemaining / timePerQuestion) * 100}%` }}
                           />

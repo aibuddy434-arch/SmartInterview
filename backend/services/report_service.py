@@ -80,7 +80,8 @@ class ReportService:
                     "id": candidate.id,
                     "name": candidate.name,
                     "email": candidate.email,
-                    "phone": candidate.phone
+                    "phone": candidate.phone,
+                    "resume_path": candidate.resume_path
                 },
                 "interview": {
                     "id": interview_config.id,
@@ -212,23 +213,62 @@ class ReportService:
                 "completeness": 0
             }
         
-        # Basic scoring based on response completeness and length
-        total_responses = len(responses)
-        complete_responses = sum(1 for r in responses if r.transcript and len(r.transcript.strip()) > 10)
+        # Filter out failed transcriptions
+        valid_responses = [r for r in responses if r.transcript and 
+                          not r.transcript.startswith("[") and 
+                          len(r.transcript.strip()) > 10]
         
-        # Communication score (based on response length and completeness)
-        avg_response_length = sum(len(r.transcript or "") for r in responses) / total_responses
-        communication_score = min(100, (complete_responses / total_responses) * 100 + (avg_response_length / 50) * 10)
+        total_responses = len(responses)
+        valid_count = len(valid_responses)
+        
+        # Base completion rate
+        completion_rate = valid_count / total_responses if total_responses > 0 else 0
+        
+        # Calculate average response length (only for valid responses)
+        if valid_responses:
+            avg_response_length = sum(len(r.transcript or "") for r in valid_responses) / valid_count
+        else:
+            avg_response_length = 0
+        
+        # Communication score (based on response length, structure, and clarity)
+        # Give base score plus bonuses for length and valid responses
+        communication_score = 20  # Base score for participating
+        if valid_count > 0:
+            communication_score += (completion_rate * 40)  # Up to 40 for completion
+            communication_score += min(30, (avg_response_length / 100) * 30)  # Up to 30 for length
+            # Bonus for using complete sentences (simple heuristic)
+            sentences_per_response = sum(r.transcript.count('.') + r.transcript.count('!') + r.transcript.count('?') 
+                                        for r in valid_responses) / valid_count
+            communication_score += min(10, sentences_per_response * 2)  # Up to 10 for structure
+        communication_score = min(100, communication_score)
         
         # Technical score (based on keywords and technical terms)
-        technical_keywords = self._extract_technical_keywords(interview_config.job_role, interview_config.focus)
-        technical_score = self._calculate_technical_score(responses, technical_keywords)
+        technical_keywords = self._extract_technical_keywords(
+            interview_config.job_role, 
+            interview_config.focus,
+            interview_config.job_description if hasattr(interview_config, 'job_description') else ""
+        )
+        technical_score = self._calculate_technical_score(valid_responses if valid_responses else responses, technical_keywords)
+        # Ensure minimum score if candidate responded
+        if valid_count > 0 and technical_score < 15:
+            technical_score = 15 + (completion_rate * 10)  # Minimum 15-25 if they answered
         
-        # Confidence score (based on response length and audio quality)
-        confidence_score = min(100, (avg_response_length / 100) * 50 + (complete_responses / total_responses) * 50)
+        # Confidence score (based on response length and consistency)
+        confidence_score = 15  # Base score
+        if valid_count > 0:
+            confidence_score += (avg_response_length / 150) * 40  # Length indicates confidence
+            confidence_score += (completion_rate * 35)  # Answering questions shows confidence
+            # Consistency bonus - if all responses are similar length
+            if valid_count > 1:
+                lengths = [len(r.transcript) for r in valid_responses]
+                avg_len = sum(lengths) / len(lengths)
+                variance = sum((l - avg_len) ** 2 for l in lengths) / len(lengths)
+                if variance < 10000:  # Low variance = consistent
+                    confidence_score += 10
+        confidence_score = min(100, confidence_score)
         
         # Completeness score
-        completeness_score = (complete_responses / total_responses) * 100
+        completeness_score = (valid_count / total_responses) * 100 if total_responses > 0 else 0
         
         return {
             "communication": round(communication_score, 1),
@@ -237,16 +277,33 @@ class ReportService:
             "completeness": round(completeness_score, 1)
         }
     
-    def _extract_technical_keywords(self, job_role: str, focus_areas: List[str]) -> List[str]:
-        """Extract technical keywords based on job role and focus areas"""
+    def _extract_technical_keywords(self, job_role: str, focus_areas: List[str], job_description: str = "") -> List[str]:
+        """Extract technical keywords based on job role, focus areas, and job description"""
         keywords = []
         
-        # Job role specific keywords
+        # Job role specific keywords - expanded list
         role_keywords = {
-            "software engineer": ["programming", "code", "algorithm", "data structure", "debugging", "testing"],
-            "data scientist": ["machine learning", "statistics", "python", "r", "data analysis", "model"],
-            "product manager": ["strategy", "roadmap", "stakeholder", "metrics", "user experience", "agile"],
-            "designer": ["user experience", "ui", "ux", "prototype", "wireframe", "design system"]
+            "software engineer": ["programming", "code", "algorithm", "data structure", "debugging", "testing", 
+                                 "api", "database", "git", "agile", "scrum", "python", "java", "javascript",
+                                 "framework", "architecture", "design pattern", "optimization", "performance"],
+            "software developer": ["programming", "code", "development", "api", "testing", "debugging",
+                                  "frontend", "backend", "database", "git", "deploy", "framework"],
+            "data scientist": ["machine learning", "statistics", "python", "r", "data analysis", "model",
+                              "tensorflow", "pandas", "numpy", "visualization", "prediction", "classification"],
+            "data analyst": ["data", "analysis", "sql", "excel", "visualization", "reporting", "insights",
+                            "dashboard", "metrics", "trends", "statistics"],
+            "product manager": ["strategy", "roadmap", "stakeholder", "metrics", "user experience", "agile",
+                               "prioritization", "requirements", "mvp", "sprint", "backlog", "user story"],
+            "designer": ["user experience", "ui", "ux", "prototype", "wireframe", "design system",
+                        "figma", "sketch", "user research", "usability", "accessibility", "responsive"],
+            "frontend": ["html", "css", "javascript", "react", "vue", "angular", "responsive", "ui",
+                        "accessibility", "performance", "webpack", "npm"],
+            "backend": ["api", "database", "server", "authentication", "authorization", "sql", "nosql",
+                       "microservices", "rest", "graphql", "security", "scalability"],
+            "devops": ["deployment", "ci/cd", "docker", "kubernetes", "aws", "azure", "terraform",
+                      "monitoring", "automation", "infrastructure", "pipeline"],
+            "full stack": ["frontend", "backend", "database", "api", "deployment", "full stack",
+                          "javascript", "react", "node", "mongodb", "sql"]
         }
         
         job_role_lower = job_role.lower()
@@ -254,9 +311,25 @@ class ReportService:
             if role in job_role_lower:
                 keywords.extend(words)
         
+        # Extract keywords from job description
+        if job_description:
+            common_tech_terms = ["experience", "project", "team", "lead", "develop", "implement",
+                                "design", "build", "create", "optimize", "improve", "manage",
+                                "collaborate", "communicate", "problem", "solution", "skill"]
+            desc_lower = job_description.lower()
+            for term in common_tech_terms:
+                if term in desc_lower:
+                    keywords.append(term)
+        
         # Add focus area keywords
         if focus_areas:
-            keywords.extend(focus_areas)
+            if isinstance(focus_areas, list):
+                keywords.extend(focus_areas)
+            elif isinstance(focus_areas, str):
+                keywords.extend(focus_areas.split(','))
+        
+        # Always include some generic professional keywords
+        keywords.extend(["experience", "project", "team", "result", "challenge", "solution"])
         
         return list(set(keywords))  # Remove duplicates
     
@@ -266,15 +339,23 @@ class ReportService:
             return 0
         
         total_score = 0
+        valid_responses = 0
+        
         for response in responses:
-            if not response.transcript:
+            if not response.transcript or response.transcript.startswith("["):
                 continue
             
+            valid_responses += 1
             response_lower = response.transcript.lower()
             keyword_matches = sum(1 for keyword in keywords if keyword.lower() in response_lower)
-            total_score += (keyword_matches / len(keywords)) * 100
+            # Calculate percentage but cap contribution per-response
+            match_percentage = min(100, (keyword_matches / max(1, len(keywords))) * 150)  # Boost multiplier
+            total_score += match_percentage
         
-        return total_score / len(responses)
+        if valid_responses == 0:
+            return 0
+            
+        return total_score / valid_responses
     
     def _calculate_duration(self, start_time: datetime, end_time: datetime) -> int:
         """Calculate duration in minutes"""

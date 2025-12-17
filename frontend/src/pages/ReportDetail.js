@@ -134,10 +134,10 @@ const ReportDetail = () => {
                     </div>
                     <div className="text-right">
                         <div className={`inline-block px-6 py-3 rounded-lg ${overall_rating === 'Excellent' ? 'bg-green-500' :
-                                overall_rating === 'Good' ? 'bg-blue-500' :
-                                    overall_rating === 'Satisfactory' ? 'bg-yellow-500' :
-                                        overall_rating === 'Needs Improvement' ? 'bg-orange-500' :
-                                            'bg-red-500'
+                            overall_rating === 'Good' ? 'bg-blue-500' :
+                                overall_rating === 'Satisfactory' ? 'bg-yellow-500' :
+                                    overall_rating === 'Needs Improvement' ? 'bg-orange-500' :
+                                        'bg-red-500'
                             }`}>
                             <p className="text-white/80 text-sm">Overall Rating</p>
                             <p className="text-2xl font-bold">{overall_rating}</p>
@@ -149,9 +149,9 @@ const ReportDetail = () => {
             {/* Hiring Recommendation Banner */}
             {overall_assessment && (
                 <div className={`rounded-xl p-6 border-2 ${overall_assessment.recommendation === 'Strongly Recommend' ? 'bg-green-50 border-green-300' :
-                        overall_assessment.recommendation === 'Recommend with Reservations' ? 'bg-blue-50 border-blue-300' :
-                            overall_assessment.recommendation === 'Consider for Junior Role' ? 'bg-yellow-50 border-yellow-300' :
-                                'bg-red-50 border-red-300'
+                    overall_assessment.recommendation === 'Recommend with Reservations' ? 'bg-blue-50 border-blue-300' :
+                        overall_assessment.recommendation === 'Consider for Junior Role' ? 'bg-yellow-50 border-yellow-300' :
+                            'bg-red-50 border-red-300'
                     }`}>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center">
@@ -209,6 +209,22 @@ const ReportDetail = () => {
                                     <div className="flex items-center text-gray-600">
                                         <Phone className="h-4 w-4 mr-3 text-gray-400" />
                                         <span className="text-sm">{candidate?.phone}</span>
+                                    </div>
+                                )}
+                                {candidate?.resume_path && (
+                                    <div className="flex items-center text-gray-600 mt-2 pt-2 border-t">
+                                        <FileText className="h-4 w-4 mr-3 text-purple-500" />
+                                        <a
+                                            href={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/${candidate.resume_path}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center"
+                                        >
+                                            View Resume
+                                            <svg className="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                            </svg>
+                                        </a>
                                     </div>
                                 )}
                             </div>
@@ -367,9 +383,9 @@ const ReportDetail = () => {
                                 <div className="w-full bg-gray-200 rounded-full h-4">
                                     <div
                                         className={`h-4 rounded-full transition-all duration-500 ${avgScore >= 80 ? 'bg-green-500' :
-                                                avgScore >= 60 ? 'bg-blue-500' :
-                                                    avgScore >= 40 ? 'bg-yellow-500' :
-                                                        'bg-red-500'
+                                            avgScore >= 60 ? 'bg-blue-500' :
+                                                avgScore >= 40 ? 'bg-yellow-500' :
+                                                    'bg-red-500'
                                             }`}
                                         style={{ width: `${avgScore}%` }}
                                     />

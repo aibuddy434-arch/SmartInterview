@@ -215,7 +215,19 @@ async def submit_response(
         upload_dir = "uploads/audio"
         os.makedirs(upload_dir, exist_ok=True)
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        audio_filename = f"audio_{session_id}_{question_number}_{timestamp}.wav"
+        
+        # Detect correct file extension from content type
+        content_type = audio_file.content_type or ""
+        if "webm" in content_type:
+            file_ext = ".webm"
+        elif "ogg" in content_type:
+            file_ext = ".ogg"
+        elif "mp3" in content_type or "mpeg" in content_type:
+            file_ext = ".mp3"
+        else:
+            file_ext = ".wav"
+        
+        audio_filename = f"audio_{session_id}_{question_number}_{timestamp}{file_ext}"
         audio_path = os.path.join(upload_dir, audio_filename)
 
         async with aiofiles.open(audio_path, 'wb') as f:
