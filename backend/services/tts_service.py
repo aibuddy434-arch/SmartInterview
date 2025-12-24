@@ -15,11 +15,27 @@ class TTSService:
         # Initialize TTS models
         self.coqui_tts = None
         self.hf_tts = None
+        self.edge_tts_available = False
         
-        if self.provider == "coqui":
-            self._init_coqui_tts()
-        elif self.provider == "hf":
-            self._init_huggingface_tts()
+        # ALWAYS try Edge TTS first (it's the fastest and best quality)
+        self._init_edge_tts()
+        
+        # If Edge TTS not available, try other providers
+        if not self.edge_tts_available:
+            if self.provider == "coqui" or self.provider == "edge":
+                self._init_coqui_tts()
+            elif self.provider == "hf":
+                self._init_huggingface_tts()
+    
+    def _init_edge_tts(self):
+        """Initialize Edge TTS (Microsoft's free cloud TTS)"""
+        try:
+            import edge_tts
+            self.edge_tts_available = True
+            logger.info("✅ Edge TTS initialized successfully (fast cloud-based TTS)")
+        except ImportError as e:
+            logger.warning(f"Edge TTS not available: {e}. Will fall back to other TTS providers.")
+            self.edge_tts_available = False
     
     def _init_coqui_tts(self):
         """Initialize Coqui TTS with Windows compatibility"""
@@ -93,7 +109,10 @@ class TTSService:
         Generate speech from text and return the file path
         """
         try:
-            if self.provider == "coqui" and self.coqui_tts:
+            # Try Edge TTS first (fastest)
+            if self.edge_tts_available:
+                return await self._generate_with_edge_tts(text, voice)
+            elif self.provider == "coqui" and self.coqui_tts:
                 return await self._generate_with_coqui(text, voice)
             elif self.provider == "hf" and self.hf_model:
                 return await self._generate_with_huggingface(text, voice)
@@ -109,6 +128,42 @@ class TTSService:
             except Exception as fallback_error:
                 logger.error(f"Fallback TTS also failed: {fallback_error}")
                 raise RuntimeError(f"TTS generation failed: {e}. Fallback also failed: {fallback_error}")
+    
+    async def _generate_with_edge_tts(self, text: str, voice: str) -> str:
+        """Generate speech using Edge TTS (Microsoft's free cloud TTS) - FAST"""
+        import edge_tts
+        
+        # Map voice parameter to Edge TTS voice names
+        voice_map = {
+            "default": "en-US-AriaNeural",
+            "male": "en-US-GuyNeural", 
+            "male_1": "en-US-GuyNeural",
+            "male_2": "en-US-ChristopherNeural",
+            "female": "en-US-AriaNeural",
+            "female_1": "en-US-AriaNeural",
+            "female_2": "en-US-JennyNeural",
+            "professional": "en-US-JennyNeural",
+            "friendly": "en-US-AriaNeural",
+            "neutral": "en-US-AriaNeural"
+        }
+        
+        edge_voice = voice_map.get(voice, "en-US-AriaNeural")
+        
+        try:
+            # Create temporary file for output
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+                output_path = temp_file.name
+            
+            # Generate speech using Edge TTS
+            communicate = edge_tts.Communicate(text, edge_voice)
+            await communicate.save(output_path)
+            
+            logger.info(f"Edge TTS generated speech successfully: {len(text)} chars -> {output_path}")
+            return output_path
+            
+        except Exception as e:
+            logger.error(f"Edge TTS generation failed: {e}")
+            raise
     
     async def _generate_with_coqui(self, text: str, voice: str) -> str:
         """Generate speech using Coqui TTS (using tts() method directly)"""
@@ -204,68 +259,62 @@ class TTSService:
             raise
     
     async def _generate_fallback(self, text: str, voice: str) -> str:
-        """Generate a fallback audio file when TTS is not available"""
+        """Generate fallback audio using Google TTS (gTTS) - FREE and high quality"""
+        
+        # Try gTTS first (Google Text-to-Speech - free, high quality)
         try:
-            import numpy as np
-            import soundfile as sf
-            
-            # Generate a more sophisticated fallback audio
-            duration = max(2.0, len(text) * 0.15)  # Rough estimate based on text length
-            sample_rate = 22050
-            samples = int(duration * sample_rate)
-            
-            # Generate a more natural-sounding tone sequence
-            t = np.linspace(0, duration, samples)
-            
-            # Create a sequence of tones that sounds more like speech
-            audio = np.zeros(samples)
-            num_segments = max(3, len(text.split()) // 2)  # More segments for longer text
-            segment_length = samples // num_segments
-            
-            # Frequencies that sound more speech-like
-            frequencies = [200, 300, 400, 500, 600, 700]  # Lower frequencies for more natural sound
-            
-            for i in range(num_segments):
-                start_idx = i * segment_length
-                end_idx = min((i + 1) * segment_length, samples)
-                segment_samples = end_idx - start_idx
-                
-                if segment_samples > 0:
-                    # Choose frequency based on text character at this position
-                    char_index = min(i * len(text) // num_segments, len(text) - 1)
-                    freq = frequencies[ord(text[char_index]) % len(frequencies)]
-                    
-                    # Generate tone with some variation
-                    segment_t = np.linspace(0, segment_samples / sample_rate, segment_samples)
-                    tone = 0.05 * np.sin(2 * np.pi * freq * segment_t)
-                    
-                    # Add some envelope to make it sound more natural
-                    envelope = np.exp(-segment_t * 2)  # Decay envelope
-                    tone *= envelope
-                    
-                    # Add some noise for more natural sound
-                    noise = 0.01 * np.random.normal(0, 1, segment_samples)
-                    tone += noise
-                    
-                    audio[start_idx:end_idx] = tone
-            
-            # Normalize audio
-            if np.max(np.abs(audio)) > 0:
-                audio = audio / np.max(np.abs(audio)) * 0.3  # Keep volume low
+            from gtts import gTTS
+            import asyncio
             
             # Create temporary file for output
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
                 output_path = temp_file.name
             
-            # Save as WAV file
-            sf.write(output_path, audio, sample_rate)
+            # Generate speech using gTTS (runs in threadpool as it's blocking)
+            loop = asyncio.get_event_loop()
             
-            logger.warning(f"Generated fallback audio for text: '{text[:50]}...'")
+            def generate_gtts():
+                tts = gTTS(text=text, lang='en', slow=False)
+                tts.save(output_path)
+            
+            await loop.run_in_executor(None, generate_gtts)
+            
+            logger.info(f"gTTS fallback generated speech: '{text[:50]}...'")
             return output_path
             
+        except ImportError:
+            logger.warning("gTTS not installed. Trying pyttsx3...")
         except Exception as e:
-            logger.error(f"Fallback audio generation failed: {e}")
-            raise RuntimeError(f"All TTS methods failed. Last error: {e}")
+            logger.warning(f"gTTS failed: {e}. Trying pyttsx3...")
+        
+        # Try pyttsx3 as second fallback (offline, uses system voice)
+        try:
+            import pyttsx3
+            import asyncio
+            
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+                output_path = temp_file.name
+            
+            loop = asyncio.get_event_loop()
+            
+            def generate_pyttsx3():
+                engine = pyttsx3.init()
+                engine.setProperty('rate', 150)  # Speed
+                engine.save_to_file(text, output_path)
+                engine.runAndWait()
+            
+            await loop.run_in_executor(None, generate_pyttsx3)
+            
+            logger.info(f"pyttsx3 fallback generated speech: '{text[:50]}...'")
+            return output_path
+            
+        except ImportError:
+            logger.warning("pyttsx3 not installed.")
+        except Exception as e:
+            logger.warning(f"pyttsx3 failed: {e}")
+        
+        # Last resort: Return error (no more silent/noise fallback)
+        raise RuntimeError("No TTS providers available. Please install edge-tts or gtts.")
     
     def get_available_voices(self) -> Dict[str, list]:
         """Get available voices for the current provider"""

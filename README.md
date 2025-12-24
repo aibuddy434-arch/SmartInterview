@@ -1,361 +1,350 @@
-# AI Interview Avatar System
+# 🎤 AI Interview Avatar System
 
-A full-stack AI-powered interview system with customizable avatars, real-time video/audio processing, and intelligent question generation.
+A full-stack AI-powered interview platform featuring dynamic AI interviewers, real-time transcription, intelligent follow-up questions, and comprehensive candidate evaluation reports.
 
-## 🚀 Features
+## ⚡ Quick Setup (5 Minutes)
 
-- **AI-Powered Interviews**: Generate custom interview questions based on job roles and descriptions
-- **Avatar Interviewers**: Customizable AI avatars with lip-sync and TTS capabilities
-- **Real-time Processing**: WebRTC integration for live video/audio streaming
-- **Smart Evaluation**: AI-powered candidate assessment and report generation
-- **Role-based Access**: Admin, Interviewer, and Candidate roles with secure authentication
-- **Media Management**: File-based storage for resumes, audio, and video responses
+### Prerequisites
+- **Python 3.10+** 
+- **Node.js 18+**
+- **MySQL 8.0+** (running)
 
-## 🏗️ Architecture
-
-- **Frontend**: React 18 + TailwindCSS + WebRTC
-- **Backend**: FastAPI + SQLAlchemy + MySQL
-- **AI Services**: Whisper (transcription), TTS (text-to-speech), Question Generation
-- **Database**: MySQL with Alembic migrations
-- **Authentication**: JWT-based with role-based access control
-
-## 📋 Prerequisites
-
-- Python 3.8+
-- Node.js 16+
-- MySQL 8.0+
-- Redis (for background tasks)
-
-## 🛠️ Installation
-
-### 1. Clone the Repository
+### Step 1: Clone & Setup Backend
 
 ```bash
-git clone <repository-url>
-cd ai-interview-avatar-system
-```
+# Clone the repository
+git clone https://github.com/dchintan80-rgb/AI_Interview.git
+cd ai_avatar
 
-### 2. Backend Setup
-
-#### Install Python Dependencies
-
-```bash
+# Setup backend
 cd backend
 python -m venv venv
-
-# On Windows
-venv\Scripts\activate
-
-# On macOS/Linux
-source venv/bin/activate
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # macOS/Linux
 
 pip install -r requirements.txt
 ```
 
-#### Database Setup
+### Step 2: Configure Environment
 
-1. **Create MySQL Database**
+Create `backend/.env` file:
+
+```env
+# Database (REQUIRED)
+DATABASE_URL=mysql+aiomysql://root:Password@localhost:3306/ai_interview
+
+# Security
+SECRET_KEY=your-secret-key-change-in-production
+
+# AI Services (Get FREE API keys)
+GOOGLE_API_KEY=your_google_api_key          # https://aistudio.google.com/
+GROQ_API_KEY=your_groq_api_key              # https://console.groq.com/
+OPENROUTER_API_KEY=your_openrouter_key      # https://openrouter.ai/ (optional)
+
+# TTS & Transcription
+TTS_PROVIDER=edge
+TRANSCRIPTION_PROVIDER=whisper
+HUGGINGFACE_API_KEY=your_hf_key             # https://huggingface.co/
+
+# Server Config
+HOST=0.0.0.0
+PORT=8000
+DEBUG=True
+ALLOWED_ORIGINS=http://localhost:3000
+UPLOAD_DIR=uploads
+```
+
+### Step 3: Setup Database
+
+```bash
+# Create MySQL database
+mysql -u root -p
+```
+
 ```sql
 CREATE DATABASE ai_interview CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'ai_interview_user'@'localhost' IDENTIFIED BY 'your_password';
-GRANT ALL PRIVILEGES ON ai_interview.* TO 'ai_interview_user'@'localhost';
-FLUSH PRIVILEGES;
+exit;
 ```
 
-2. **Configure Environment Variables**
 ```bash
-cp env.example .env
+# Run migrations
+cd backend
+venv\Scripts\python add_question_columns.py   # Add required columns
 ```
 
-Edit `.env` with your database credentials:
-```env
-DATABASE_URL=mysql+aiomysql://ai_interview_user:your_password@localhost:3306/ai_interview
-SECRET_KEY=your-super-secret-key-change-this-in-production
-```
+### Step 4: Create Upload Directories
 
-3. **Run Database Migrations**
 ```bash
-# Initialize Alembic (first time only)
-alembic init alembic
-
-# Generate initial migration
-alembic revision --autogenerate -m "Initial database schema"
-
-# Apply migrations
-alembic upgrade head
+cd backend
+mkdir uploads uploads\resumes uploads\audio uploads\video
 ```
 
-#### Create Uploads Directory
-```bash
-mkdir uploads
-mkdir uploads/resumes
-mkdir uploads/audio
-mkdir uploads/video
-```
-
-### 3. Frontend Setup
+### Step 5: Setup Frontend
 
 ```bash
 cd ../frontend
 npm install
 ```
 
-## 🚀 Running the Application
+### Step 6: Start Everything
 
-### 1. Start MySQL and Redis
-
-```bash
-# Start MySQL (Windows)
-net start mysql
-
-# Start MySQL (macOS with Homebrew)
-brew services start mysql
-
-# Start Redis (Windows)
-redis-server
-
-# Start Redis (macOS with Homebrew)
-brew services start redis
-```
-
-### 2. Start Backend Server
-
+**Terminal 1 (Backend):**
 ```bash
 cd backend
-# Activate virtual environment if not already active
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+venv\Scripts\activate
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-The backend will be available at: http://localhost:8000
-
-### 3. Start Frontend Development Server
-
+**Terminal 2 (Frontend):**
 ```bash
 cd frontend
 npm start
 ```
 
-The frontend will be available at: http://localhost:3000
-
-### 4. Access the Application
-
+### 🎉 Access the App
 - **Frontend**: http://localhost:3000
-- **Backend API**: http://localhost:8000
-- **API Documentation**: http://localhost:8000/docs
-- **Health Check**: http://localhost:8000/health
-
-## 📚 API Endpoints
-
-### Authentication
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-- `POST /api/auth/refresh` - Refresh JWT token
-
-### Interview Management
-- `POST /api/interviews/create` - Create interview configuration
-- `GET /api/interviews/configs` - Get user's interview configs
-- `POST /api/interviews/generate-questions` - Generate AI questions
-- `PUT /api/interviews/configs/{id}` - Update interview config
-- `DELETE /api/interviews/configs/{id}` - Delete interview config
-
-### AI Services
-- `POST /api/ai/transcribe` - Transcribe audio/video
-- `POST /api/ai/tts` - Text-to-speech conversion
-- `POST /api/ai/generate-questions` - Generate interview questions
-
-### Candidates
-- `POST /api/candidates/register` - Candidate registration
-- `POST /api/candidates/upload-resume` - Upload resume
-- `GET /api/candidates/{id}` - Get candidate details
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | MySQL connection string | `mysql+aiomysql://username:password@localhost:3306/ai_interview` |
-| `SECRET_KEY` | JWT secret key | `your-secret-key-here` |
-| `DEBUG` | Debug mode | `True` |
-| `UPLOAD_DIR` | File upload directory | `uploads` |
-| `MAX_FILE_SIZE` | Maximum file size (bytes) | `10485760` (10MB) |
-
-### AI Service Configuration
-
-| Variable | Description | Options |
-|----------|-------------|---------|
-| `TRANSCRIPTION_PROVIDER` | Speech-to-text service | `whisper`, `openai`, `huggingface` |
-| `TTS_PROVIDER` | Text-to-speech service | `coqui`, `huggingface` |
-| `OPENAI_API_KEY` | OpenAI API key (optional) | Your OpenAI API key |
-
-## 🗄️ Database Schema
-
-### Core Tables
-
-- **users**: User accounts with role-based access
-- **interview_configs**: Interview configurations and settings
-- **questions**: Interview questions with metadata
-- **candidates**: Candidate information and resumes
-- **interview_sessions**: Active interview sessions
-- **responses**: Candidate responses with media
-- **reports**: AI-generated evaluation reports
-
-### Key Features
-
-- **UUID Primary Keys**: All tables use UUIDs instead of auto-increment IDs
-- **JSON Fields**: Flexible storage for tags, focus areas, and breakdowns
-- **File Paths**: Media files stored on filesystem with database references
-- **Relationships**: Proper foreign key constraints and cascading deletes
-
-## 🔄 Database Migrations
-
-### Creating New Migrations
-
-```bash
-cd backend
-alembic revision --autogenerate -m "Description of changes"
-```
-
-### Applying Migrations
-
-```bash
-# Apply all pending migrations
-alembic upgrade head
-
-# Rollback to specific revision
-alembic downgrade <revision_id>
-
-# Check current migration status
-alembic current
-```
-
-### Migration Best Practices
-
-1. **Always backup** your database before running migrations
-2. **Test migrations** on a copy of production data
-3. **Review generated migrations** before applying
-4. **Use descriptive names** for migration messages
-
-## 🧪 Testing
-
-### Backend Tests
-
-```bash
-cd backend
-pytest tests/
-```
-
-### Frontend Tests
-
-```bash
-cd frontend
-npm test
-```
-
-## 🚀 Deployment
-
-### Production Considerations
-
-1. **Environment Variables**: Set `DEBUG=False` in production
-2. **Database**: Use production MySQL instance with proper credentials
-3. **File Storage**: Configure proper file paths and permissions
-4. **Security**: Use strong SECRET_KEY and HTTPS
-5. **Monitoring**: Set up logging and health checks
-
-### Docker Deployment
-
-```bash
-# Build and run with Docker Compose
-docker-compose up -d
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-1. **Database Connection Error**
-   - Verify MySQL is running
-   - Check database credentials in `.env`
-   - Ensure database exists
-
-2. **Migration Errors**
-   - Check MySQL version compatibility
-   - Verify database user permissions
-   - Review migration files for syntax errors
-
-3. **File Upload Issues**
-   - Check upload directory permissions
-   - Verify file size limits
-   - Check allowed file extensions
-
-### Logs
-
-- **Backend**: Check console output and application logs
-- **Database**: Check MySQL error logs
-- **Frontend**: Check browser console and network tab
-
-## 📖 Development
-
-### Code Structure
-
-```
-backend/
-├── app/
-│   ├── db.py              # Database configuration
-│   ├── orm_models.py      # SQLAlchemy models
-│   ├── repositories/      # Data access layer
-│   └── config.py          # Configuration management
-├── services/              # Business logic
-├── routes/                # API endpoints
-├── models/                # Pydantic models
-└── utils/                 # Utility functions
-
-frontend/
-├── src/
-│   ├── components/        # React components
-│   ├── pages/            # Page components
-│   ├── services/         # API services
-│   └── contexts/         # React contexts
-```
-
-### Adding New Features
-
-1. **Database**: Add models to `orm_models.py`
-2. **API**: Create routes in `routes/` directory
-3. **Business Logic**: Implement in `services/` directory
-4. **Frontend**: Add components and pages
-5. **Migrations**: Generate and test database changes
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
-
-## 📄 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## 🆘 Support
-
-For support and questions:
-- Create an issue in the repository
-- Check the troubleshooting section
-- Review the API documentation at `/docs`
-
-## 🔮 Roadmap
-
-- [ ] Enhanced AI question generation
-- [ ] Real-time collaboration features
-- [ ] Advanced analytics dashboard
-- [ ] Mobile application
-- [ ] Multi-language support
-- [ ] Integration with HR systems
+- **API Docs**: http://localhost:8000/docs
 
 ---
 
-**Note**: This system is designed for educational and development purposes. For production use, ensure proper security measures, data privacy compliance, and thorough testing.
+## 🎯 How It Works
 
+### Interview Flow
 
+```
+1. ADMIN creates interview config
+   ↓
+   - Sets job role, description, difficulty
+   - AI generates preset questions
+   - Sets time limit (e.g., 10 minutes)
+   - Gets shareable link
+
+2. CANDIDATE opens interview link
+   ↓
+   - Enters name, email, uploads resume
+   - Starts interview session
+
+3. AI AVATAR asks questions
+   ↓
+   - Text-to-Speech (Edge TTS)
+   - Avatar lip-sync animation
+   - Timer starts after question
+
+4. CANDIDATE answers
+   ↓
+   - Audio recorded (MediaRecorder API)
+   - Live transcription displayed
+   - Timer counts down
+
+5. AI DECIDES next action
+   ↓
+   - "preset": Ask next main question
+   - "follow_up": Probe deeper (max 1 per question)
+   - "resume": Ask about candidate's resume
+   - "complete": End interview
+
+6. REPORT generated
+   ↓
+   - AI analyzes all Q&A pairs
+   - Scores: Communication, Technical, Problem-Solving
+   - Per-answer key points & improvements
+   - Overall recommendation
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        FRONTEND                              │
+│  React 18 + TailwindCSS + WebRTC                            │
+├─────────────────────────────────────────────────────────────┤
+│  Pages:                                                      │
+│  ├── PublicInterview.js  (Candidate interview UI)           │
+│  ├── InterviewCreator.js (Admin creates interviews)         │
+│  ├── ReportDetail.js     (View interview reports)           │
+│  └── Dashboard.js        (Admin dashboard)                  │
+├─────────────────────────────────────────────────────────────┤
+│  Services:                                                   │
+│  ├── publicInterviewService.js  (Interview API calls)       │
+│  ├── aiService.js               (TTS & transcription)       │
+│  └── avatarService.js           (Avatar control)            │
+└─────────────────────────────────────────────────────────────┘
+                              ↕ HTTP API
+┌─────────────────────────────────────────────────────────────┐
+│                        BACKEND                               │
+│  FastAPI + SQLAlchemy + MySQL                               │
+├─────────────────────────────────────────────────────────────┤
+│  Routes:                                                     │
+│  ├── public.py       (Interview session endpoints)          │
+│  ├── interviews.py   (Interview config CRUD)                │
+│  ├── candidates.py   (Candidate management)                 │
+│  └── auth.py         (Authentication)                       │
+├─────────────────────────────────────────────────────────────┤
+│  Services:                                                   │
+│  ├── ai_question_service.py  (AI decision: next question)   │
+│  ├── report_service.py       (Generate interview reports)   │
+│  ├── tts_service.py          (Text-to-Speech)               │
+│  └── transcription_service.py (Speech-to-Text)              │
+├─────────────────────────────────────────────────────────────┤
+│  AI Providers (with fallback):                              │
+│  ├── OpenRouter → Gemini → Groq  (Question decisions)       │
+│  ├── Google STT → Whisper        (Transcription)            │
+│  └── Edge TTS                    (Voice synthesis)          │
+└─────────────────────────────────────────────────────────────┘
+                              ↕ ORM
+┌─────────────────────────────────────────────────────────────┐
+│                        DATABASE                              │
+│  MySQL 8.0                                                  │
+├─────────────────────────────────────────────────────────────┤
+│  Tables:                                                     │
+│  ├── users              (Admin/Interviewer accounts)        │
+│  ├── interview_configs  (Interview settings & questions)    │
+│  ├── candidates         (Candidate info & resumes)          │
+│  ├── interview_sessions (Active/completed sessions)         │
+│  ├── responses          (Q&A with question_text, type)      │
+│  └── reports            (AI-generated evaluations)          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔑 Key Features
+
+### 🤖 Dynamic AI Interviewer
+- Asks preset questions + intelligent follow-ups
+- Time-aware decisions (respects interview duration)
+- Resume-based questions (probes candidate's experience)
+- Max 1 follow-up per preset question
+
+### ⏱️ Smart Time Management
+- Timer pauses during AI speech
+- Dynamic question timing based on remaining time
+- Time capping: Never assigns more time than available
+
+### 📊 Intelligent Reports
+- Per-question analysis with unique key points
+- Color-coded question types:
+  - 🔵 Blue: Preset questions
+  - 🟣 Purple: Follow-up questions  
+  - 🟢 Green: Resume questions
+- Questions displayed in exact interview order
+
+### 🎙️ Real-time Transcription
+- Live transcript display during answer
+- Browser Speech API with fallback to Google STT
+- Transcript saved with each response
+
+---
+
+## 📁 Project Structure
+
+```
+ai_avatar/
+├── backend/
+│   ├── main.py                 # FastAPI entry point
+│   ├── app/
+│   │   ├── db.py               # Database connection
+│   │   ├── orm_models.py       # SQLAlchemy models
+│   │   └── repositories/       # Data access layer
+│   ├── routes/
+│   │   ├── public.py           # Public interview endpoints
+│   │   ├── interviews.py       # Interview management
+│   │   └── auth.py             # Authentication
+│   ├── services/
+│   │   ├── ai_question_service.py   # AI decision logic
+│   │   ├── report_service.py        # Report generation
+│   │   ├── tts_service.py           # Text-to-Speech
+│   │   └── transcription_service.py # Speech-to-Text
+│   ├── models/                 # Pydantic schemas
+│   ├── uploads/                # File storage
+│   └── .env                    # Environment variables
+│
+├── frontend/
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── PublicInterview.js  # Interview UI
+│   │   │   ├── ReportDetail.js     # Report display
+│   │   │   └── InterviewCreator.js # Create interviews
+│   │   ├── components/
+│   │   │   └── ui/             # Reusable UI components
+│   │   └── services/
+│   │       ├── publicInterviewService.js
+│   │       └── aiService.js
+│   └── public/
+│
+├── database/
+│   └── README.md               # Database documentation
+│
+└── README.md                   # This file
+```
+
+---
+
+## 🔧 API Quick Reference
+
+### Public Interview Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/public/interview/{id}` | Get interview config |
+| POST | `/api/public/session/start` | Start interview session |
+| POST | `/api/public/session/{id}/submit-response` | Submit answer & get next question |
+| GET | `/api/public/session/{id}` | Get session status |
+
+### Report Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/reports/session/{id}` | Get interview report |
+| GET | `/api/reports/` | List all reports |
+
+---
+
+## 🛠️ Troubleshooting
+
+### "Database connection failed"
+```bash
+# Check MySQL is running
+mysql -u root -p -e "SELECT 1"
+
+# Verify .env DATABASE_URL is correct
+```
+
+### "AI not responding"
+```bash
+# Check API keys in .env
+# Verify GROQ_API_KEY and GOOGLE_API_KEY are valid
+```
+
+### "No audio recorded"
+```
+# Browser needs microphone permission
+# Check browser console for errors
+# Ensure HTTPS (or localhost) for MediaRecorder
+```
+
+### "Report shows same key points"
+```bash
+# Restart backend after recent changes
+cd backend
+venv\Scripts\python -m uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+---
+
+## 📝 Recent Changes
+
+- ✅ Max 1 follow-up per preset question
+- ✅ Time capping for all question types
+- ✅ Follow-up/Resume question labels in reports
+- ✅ Unique key points per answer
+- ✅ Questions ordered by interview sequence
+- ✅ Live transcription display
+
+---
+
+## 📄 License
+
+MIT License - See LICENSE file for details.

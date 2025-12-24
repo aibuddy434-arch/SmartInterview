@@ -147,12 +147,12 @@ class SessionRepository:
             raise
 
     async def get_session_responses(self, session_id: str) -> List[Response]:
-        """Get all responses for an interview session"""
+        """Get all responses for an interview session, ordered by creation time (interview sequence)"""
         try:
             result = await self.db.execute(
                 select(Response)
                 .where(Response.session_id == session_id)
-                .order_by(Response.question_number)
+                .order_by(Response.created_at)  # Order by creation time for correct interview sequence
             )
             return result.scalars().all()
         except Exception as e:

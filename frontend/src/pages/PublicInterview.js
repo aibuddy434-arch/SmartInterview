@@ -43,6 +43,7 @@ const PublicInterview = () => {
   const [isTimerActive, setIsTimerActive] = useState(false); // Whether timer is counting down
   const [isTimerPaused, setIsTimerPaused] = useState(true); // Timer paused during TTS/prep
   const [isSpeaking, setIsSpeaking] = useState(false); // Is avatar currently speaking?
+  const [nextQuestionTime, setNextQuestionTime] = useState(null); // Dynamic time for next question from AI
   // --- End Timer State ---
 
   const [isRecording, setIsRecording] = useState(false);
@@ -74,29 +75,29 @@ const PublicInterview = () => {
 
   // --- Core Functions (wrapped in useCallback) ---
 
-  const askQuestion = useCallback(async (questionText) => {
-    if (!avatarElement) {
-      console.warn('Avatar element not ready, cannot ask question.');
-      return;
-    }
+  const askQuestion = useCallback(async (questionText, dynamicTimeOverride = null) => {
+    // NOTE: Avatar element is optional - TTS works without it
     if (!questionText || questionText.trim() === '') {
       console.warn('Empty question text provided.');
       return;
     }
 
-    console.log("[ASK] Starting to ask question:", questionText);
+    console.log("[ASK] Starting to ask question:", questionText.substring(0, 50) + "...");
 
     // PAUSE timer while speaking
     setIsSpeaking(true);
     setIsTimerPaused(true);
 
     try {
+      console.log("[ASK] Calling TTS service...");
       const audioBlob = await aiService.generateTTS(questionText);
       if (!audioBlob) {
+        console.error('[ASK] TTS returned null blob');
         toast.error('Could not generate speech audio.');
         setIsSpeaking(false);
         return;
       }
+      console.log("[ASK] TTS blob received, size:", audioBlob.size);
       const audioUrl = URL.createObjectURL(audioBlob);
       const audio = new Audio(audioUrl);
 
@@ -105,8 +106,9 @@ const PublicInterview = () => {
         console.log("[ASK] Avatar finished speaking. Prep time starting...");
         setIsSpeaking(false);
 
-        // Show prep time toast
-        toast("💡 Prepare your answer...", {
+        // Show prep time toast with dynamic time info
+        const timeToUse = dynamicTimeOverride || nextQuestionTime || timePerQuestion || 120;
+        toast(`💡 Prepare your answer... (${Math.floor(timeToUse / 60)}:${(timeToUse % 60).toString().padStart(2, '0')})`, {
           icon: '⏱️',
           duration: 2000,
           style: { background: '#FFF3CD', color: '#856404' }
@@ -114,15 +116,15 @@ const PublicInterview = () => {
 
         // After 2 sec prep time: start timer and recording
         setTimeout(() => {
-          console.log("[ASK] Prep time over. Starting timer and recording!");
+          console.log(`[ASK] Prep time over. Starting timer with ${timeToUse}s and recording!`);
 
           // RESUME timer
           setIsTimerPaused(false);
 
-          // Start the question timer NOW
+          // Start the question timer NOW with dynamic time
           if (startQuestionTimerRef.current) {
-            console.log("[TIMER] Starting question timer now");
-            startQuestionTimerRef.current();
+            console.log(`[TIMER] Starting question timer now with ${timeToUse} seconds`);
+            startQuestionTimerRef.current(timeToUse);
           }
 
           // Auto-start recording
@@ -151,11 +153,12 @@ const PublicInterview = () => {
 
     } catch (error) {
       console.error('Failed to ask question:', error);
-      toast.error('A critical error occurred while trying to ask the question.');
+      const errorMessage = error?.message || error?.toString() || 'Unknown error';
+      toast.error(`TTS Error: ${errorMessage.substring(0, 100)}`);
       setIsSpeaking(false);
       setIsTimerPaused(false);
     }
-  }, [avatarElement, isRecording]);
+  }, [isRecording, nextQuestionTime, timePerQuestion]);
 
   const completeInterview = useCallback(async (reason = 'normal') => {
     if (!sessionId) return;
@@ -206,15 +209,18 @@ const PublicInterview = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }, []);
 
-  const startQuestionTimer = useCallback(() => {
-    if (!timePerQuestion) return;
+  // Updated to accept optional customTime for dynamic AI-determined timing
+  const startQuestionTimer = useCallback((customTime = null) => {
+    const timeToUse = customTime || timePerQuestion;
+    if (!timeToUse) return;
 
     // Clear existing timer
     if (questionTimerRef.current) {
       clearInterval(questionTimerRef.current);
     }
 
-    setQuestionTimeRemaining(timePerQuestion);
+    console.log(`[TIMER] Starting question timer with ${timeToUse} seconds`);
+    setQuestionTimeRemaining(timeToUse);
     autoSubmitTriggeredRef.current = false;
 
     questionTimerRef.current = setInterval(() => {
@@ -230,13 +236,15 @@ const PublicInterview = () => {
     }, 1000);
   }, [timePerQuestion]);
 
-  const resetQuestionTimer = useCallback(() => {
+  // Updated to accept optional customTime parameter
+  const resetQuestionTimer = useCallback((customTime = null) => {
     if (questionTimerRef.current) {
       clearInterval(questionTimerRef.current);
       questionTimerRef.current = null;
     }
-    if (timePerQuestion) {
-      setQuestionTimeRemaining(timePerQuestion);
+    const timeToSet = customTime || timePerQuestion;
+    if (timeToSet) {
+      setQuestionTimeRemaining(timeToSet);
     }
   }, [timePerQuestion]);
 
@@ -298,7 +306,27 @@ const PublicInterview = () => {
       formData.append('question_number', currentQuestionIndex + 1);
       formData.append('audio_file', audioToSubmit, 'response.wav');
 
-      console.log(`[submitResponse] Submitting response for question ${currentQuestionIndex + 1}...`);
+      // NEW: Send question metadata for proper report labeling
+      if (currentQuestionText) {
+        formData.append('question_text', currentQuestionText);
+      }
+      // Map frontend display types to backend format
+      let qType = 'preset';
+      if (currentQuestionType === 'Follow-up') {
+        qType = 'follow_up';
+      } else if (currentQuestionType === 'From Resume') {
+        qType = 'resume';
+      }
+      formData.append('question_type', qType);
+
+      // Send live transcript as fallback for transcription failures
+      const fullTranscript = liveTranscript + (interimTranscript ? ' ' + interimTranscript : '');
+      if (fullTranscript && fullTranscript.trim().length > 0) {
+        formData.append('live_transcript', fullTranscript.trim());
+        console.log(`[submitResponse] Including live transcript: ${fullTranscript.length} chars`);
+      }
+
+      console.log(`[submitResponse] Submitting response for question ${currentQuestionIndex + 1}, type: ${qType}...`);
 
       const result = await publicInterviewService.submitResponse(sessionId, formData);
       console.log("[submitResponse] Backend response received:", result);
@@ -307,9 +335,11 @@ const PublicInterview = () => {
         toast.success("Response submitted!");
         setAudioResponse(null); // Clear previous audio blob
 
-        const { action, question_text, next_index } = result.data;
+        const { action, question_text, next_index, suggested_time_seconds } = result.data;
 
-        console.log(`[submitResponse] AI Decision - Action: ${action}, Next Index: ${next_index}`);
+        // Use AI-suggested time if available, otherwise default to 120 seconds
+        const dynamicTime = suggested_time_seconds || 120;
+        console.log(`[submitResponse] AI Decision - Action: ${action}, Next Index: ${next_index}, Time: ${dynamicTime}s`);
 
         // --- THIS IS THE FIX ---
         // The counter increment was moved from here...
@@ -321,38 +351,42 @@ const PublicInterview = () => {
 
         } else if (action === "preset") {
           const newIndex = next_index - 1;
-          console.log(`[submitResponse] Moving to preset question at index ${newIndex} (1-based: ${next_index})`);
+          console.log(`[submitResponse] Moving to preset question at index ${newIndex} (1-based: ${next_index}, time: ${dynamicTime}s)`);
 
           setTotalQuestionsAsked(prev => prev + 1); // <-- ...to inside here
           setCurrentQuestionIndex(newIndex);
           setCurrentQuestionText(question_text);
           setCurrentQuestionType('Preset');
+          setNextQuestionTime(dynamicTime); // Store dynamic time for this question
 
           // Timer will start after TTS finishes in askQuestion() - don't start here
-          resetQuestionTimer(); // Just reset the display
+          resetQuestionTimer(dynamicTime); // Just reset the display with dynamic time
 
+          // Ask next question immediately
           setTimeout(() => {
             if (question_text) {
-              askQuestion(question_text);
+              askQuestion(question_text, dynamicTime);
             }
-          }, 1000);
+          }, 200); // Minimal delay for instant questions
 
 
         } else if (action === "follow_up" || action === "resume") {
-          console.log(`[submitResponse] Asking ${action} question: ${question_text}`);
+          console.log(`[submitResponse] Asking ${action} question: ${question_text} (time: ${dynamicTime}s)`);
 
           setTotalQuestionsAsked(prev => prev + 1); // <-- ...and inside here
           setCurrentQuestionText(question_text);
           setCurrentQuestionType(action === 'follow_up' ? 'Follow-up' : 'From Resume');
+          setNextQuestionTime(dynamicTime); // Store dynamic time for follow-up
 
           // Timer will start after TTS finishes in askQuestion() - don't start here
-          resetQuestionTimer(); // Just reset the display
+          resetQuestionTimer(dynamicTime); // Just reset the display with dynamic time
 
+          // Ask follow-up question immediately
           setTimeout(() => {
             if (question_text) {
-              askQuestion(question_text);
+              askQuestion(question_text, dynamicTime);
             }
-          }, 1000);
+          }, 200); // Minimal delay for instant questions
 
         } else {
           console.warn(`[submitResponse] Unknown action: ${action}`);
@@ -369,7 +403,7 @@ const PublicInterview = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [audioResponse, sessionId, currentQuestionIndex, askQuestion, setCurrentQuestionText, setCurrentQuestionType, setTotalQuestionsAsked, resetQuestionTimer]);
+  }, [audioResponse, sessionId, currentQuestionIndex, liveTranscript, interimTranscript, askQuestion, setCurrentQuestionText, setCurrentQuestionType, setTotalQuestionsAsked, resetQuestionTimer]);
 
   // Keep ref updated with latest submitResponse for auto-submit
   useEffect(() => {
@@ -384,18 +418,44 @@ const PublicInterview = () => {
     }
 
     setSubmitting(true);
-    console.log("[startInterview] Clicked. Playing silent audio...");
-    const silentAudio = new Audio("data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vVGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBvZiB0aGUgUm9ja3VziciATTdXAAALEwAAGoGnP3sBCAADxI/e/wYGBgYHBwcHCAgICAkKCgwMDQ4ODxEREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ucHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AABm3GvrFVAFwAAB9wz/DBAA");
-    silentAudio.play().catch(e => console.warn("[startInterview] Silent audio playback failed:", e));
+    console.log("[startInterview] Clicked. Playing silent audio to unlock browser audio...");
+
+    // IMPORTANT: This silent audio unlocks the browser's audio context
+    try {
+      const silentAudio = new Audio("data:audio/mp3;base64,SUQzBAAAAAABEVRYWFgAAAAtAAADY29tbWVudABCaWdTb3VuZEJhbmsuY29tIC8gTGFTb25vVGhlcXVlLm9yZwBURU5DAAAAHQAAA1N3aXRjaCBvZiB0aGUgUm9ja3VziciATTdXAAALEwAAGoGnP3sBCAADxI/e/wYGBgYHBwcHCAgICAkKCgwMDQ4ODxEREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0+P0BBQkNERUZHSElKS0xNTk9QUVJTVFVWV1hZWltcXV5fYGFiY2RlZmdoaWprbG1ucHFyc3R1dnd4eXp7fH1+f4CBgoOEhYaHiImKi4yNjo+QkZKTlJWWl5iZmpucnZ6foKGio6SlpqeoqaqrrK2ur7CxsrO0tba3uLm6u7y9vr/AwcLDxMXGx8jJysvMzc7P0NHS09TV1tfY2drb3N3e3+Dh4uPk5ebn6Onq6+zt7u/w8fLz9PX29/j5+vv8/f7/AABm3GvrFVAFwAAB9wz/DBAA");
+      await silentAudio.play();
+      console.log("[startInterview] Audio context unlocked.");
+    } catch (e) {
+      console.warn("[startInterview] Silent audio playback failed (this is okay):", e);
+    }
 
     try {
       console.log("[startInterview] Calling startSession API...");
       const result = await publicInterviewService.startSession(sessionId);
 
       if (result && result.success === true) {
-        console.log("[startInterview] API SUCCESS. Requesting state update: setStep('interview').");
+        console.log("[startInterview] API SUCCESS. Setting step to interview...");
         setStep('interview');
-        toast.success('Interview started! Please wait for the first question.');
+        toast.success('Interview starting! First question coming...');
+
+        // DIRECTLY ASK FIRST QUESTION HERE - Don't rely on useEffect
+        if (interview?.questions?.length > 0) {
+          const firstQuestion = interview.questions[0];
+          const firstQuestionText = firstQuestion.text;
+          const firstQuestionTime = firstQuestion.suggested_time_seconds || 120;
+
+          console.log(`[startInterview] Asking first question directly: "${firstQuestionText.substring(0, 50)}..."`);
+          setCurrentQuestionText(firstQuestionText);
+          setTotalQuestionsAsked(1);
+          setCurrentQuestionType('Preset');
+          setNextQuestionTime(firstQuestionTime);
+          hasAskedFirstQuestionRef.current = true; // Mark as asked
+
+          // Call askQuestion immediately - minimal delay
+          setTimeout(() => {
+            askQuestion(firstQuestionText, firstQuestionTime);
+          }, 100); // Reduced from 500ms to 100ms for faster start
+        }
       } else {
         console.error("[startInterview] startSession API failed:", result?.error);
         toast.error(result?.error || 'Failed to start the interview session.');
@@ -406,7 +466,7 @@ const PublicInterview = () => {
     } finally {
       setSubmitting(false);
     }
-  }, [sessionId]);
+  }, [sessionId, interview, askQuestion, setCurrentQuestionText, setCurrentQuestionType, setTotalQuestionsAsked, setNextQuestionTime]);
 
   const loadInterview = useCallback(async () => {
     if (!interviewId) return;
@@ -654,8 +714,12 @@ const PublicInterview = () => {
 
     if (step === 'interview' && avatarElement && interview?.questions?.length > 0 && currentQuestionIndex === 0) {
 
-      const firstQuestionText = interview.questions[0].text;
-      console.log("[Q1 Effect Triggered] Conditions met! Asking Question 1...");
+      const firstQuestion = interview.questions[0];
+      const firstQuestionText = firstQuestion.text;
+      // Get dynamic time from first question, default to 120s
+      const firstQuestionTime = firstQuestion.suggested_time_seconds || 120;
+
+      console.log(`[Q1 Effect Triggered] Will ask Question 1 with ${firstQuestionTime}s after 1.5s delay...`);
 
       // Mark as asked BEFORE asking to prevent race conditions
       hasAskedFirstQuestionRef.current = true;
@@ -663,10 +727,14 @@ const PublicInterview = () => {
       setCurrentQuestionText(firstQuestionText);
       setTotalQuestionsAsked(1);
       setCurrentQuestionType('Preset');
+      setNextQuestionTime(firstQuestionTime); // Set dynamic time for Q1
 
+      // Increased delay to 1.5s to allow TTS service to fully initialize
+      // This is a common issue with browser audio context requiring user interaction
       const timer = setTimeout(() => {
-        askQuestion(firstQuestionText);
-      }, 100);
+        console.log(`[Q1 Effect] NOW calling askQuestion for: "${firstQuestionText.substring(0, 50)}..."`);
+        askQuestion(firstQuestionText, firstQuestionTime);
+      }, 1500); // Increased from 100ms to 1500ms
 
       return () => clearTimeout(timer);
     } else {
@@ -1176,7 +1244,7 @@ const PublicInterview = () => {
                       <div className="text-center mt-4">
                         <p className="text-sm text-green-600 mb-2">Recording complete! Ready to submit.</p>
                         <Button
-                          onClick={submitResponse}
+                          onClick={() => submitResponse(false)}
                           variant="success"
                           loading={submitting}
                           disabled={submitting}
@@ -1185,6 +1253,26 @@ const PublicInterview = () => {
                         </Button>
                       </div>
                     )}
+
+                    {/* End Interview Button */}
+                    <div className="border-t pt-4 mt-4">
+                      <div className="text-center">
+                        <p className="text-xs text-gray-500 mb-2">Want to end the interview early?</p>
+                        <Button
+                          onClick={() => {
+                            if (window.confirm('Are you sure you want to end the interview? Your responses so far will be saved.')) {
+                              completeInterview('manual');
+                            }
+                          }}
+                          variant="secondary"
+                          size="sm"
+                          disabled={submitting}
+                          className="text-red-600 hover:bg-red-50"
+                        >
+                          End Interview
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 </CardBody>
               </Card>

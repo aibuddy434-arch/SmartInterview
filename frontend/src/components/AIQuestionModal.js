@@ -8,10 +8,10 @@ import Select from './ui/Select';
 import Checkbox from './ui/Checkbox';
 import toast from 'react-hot-toast';
 
-const AIQuestionModal = ({ 
-  isOpen, 
-  onClose, 
-  onQuestionsGenerated, 
+const AIQuestionModal = ({
+  isOpen,
+  onClose,
+  onQuestionsGenerated,
   interviewService,
   initialData = {}
 }) => {
@@ -51,7 +51,7 @@ const AIQuestionModal = ({
   const handleFocusAreaChange = (area, checked) => {
     setFormData(prev => ({
       ...prev,
-      focus_areas: checked 
+      focus_areas: checked
         ? [...prev.focus_areas, area]
         : prev.focus_areas.filter(f => f !== area)
     }));
@@ -70,47 +70,48 @@ const AIQuestionModal = ({
 
     setLoading(true);
     try {
-      // Mock questions for testing since backend might not be available
-      const baseQuestions = [
-        `Tell me about your experience with ${formData.job_role} and how it relates to this position.`,
-        `Describe a challenging project you've worked on in ${formData.job_role} and how you overcame obstacles.`,
-        `How do you stay updated with the latest trends and technologies in ${formData.job_role}?`,
-        `What's your approach to problem-solving in complex ${formData.job_role} scenarios?`,
-        `How do you handle teamwork and collaboration in ${formData.job_role} projects?`,
-        `What specific skills do you bring to this ${formData.job_role} position?`,
-        `How do you prioritize tasks when working on multiple ${formData.job_role} projects?`,
-        `Describe a time when you had to learn a new technology for a ${formData.job_role} project.`,
-        `How do you ensure quality in your ${formData.job_role} work?`,
-        `What's your experience with agile methodologies in ${formData.job_role} development?`
-      ];
-      
-      // Generate the requested number of questions
-      const requestedCount = parseInt(formData.number_of_questions) || 5;
-      const mockQuestions = baseQuestions.slice(0, Math.min(requestedCount, baseQuestions.length));
+      // Call the actual backend API to generate AI questions
+      console.log('[AIQuestionModal] Calling backend API to generate questions...');
+      const result = await interviewService.generateQuestions({
+        job_role: formData.job_role,
+        job_description: formData.job_description,
+        difficulty: formData.difficulty,
+        number_of_questions: parseInt(formData.number_of_questions) || 5,
+        focus: formData.focus_areas
+      });
 
-      // Transform the mock questions into the expected format
-      const questions = mockQuestions.map((q, index) => ({
-        id: `ai_${Date.now()}_${index}`,
-        text: q,
-        type: 'ai_generated',
-        order: index + 1,
-        tags: ['technical', 'experience']
-      }));
+      console.log('[AIQuestionModal] Backend response:', result);
 
-      setGeneratedQuestions(questions);
-      toast.success(`Generated ${questions.length} AI questions successfully!`);
-      
-      // Automatically call onQuestionsGenerated when questions are generated
-      console.log('Calling onQuestionsGenerated with:', questions);
-      onQuestionsGenerated(questions);
-      
+      // The backend returns { success: true, questions: [...], count: N }
+      if (result.success && result.questions && result.questions.length > 0) {
+        // Transform the backend questions into the expected format
+        const questions = result.questions.map((q, index) => ({
+          id: `ai_${Date.now()}_${index}`,
+          text: q.text,
+          type: 'ai_generated',
+          order: index + 1,
+          tags: q.tags || ['technical', 'experience'],
+          generated_by: q.generated_by || 'ai'
+        }));
+
+        setGeneratedQuestions(questions);
+        toast.success(`Generated ${questions.length} AI questions successfully!`);
+
+        // Automatically call onQuestionsGenerated when questions are generated
+        console.log('[AIQuestionModal] Calling onQuestionsGenerated with:', questions);
+        onQuestionsGenerated(questions);
+      } else {
+        toast.error('No questions were generated. Please try again.');
+      }
+
     } catch (err) {
-      console.error('Failed to generate questions:', err);
-      toast.error(err.response?.data?.detail || 'Failed to generate AI questions');
+      console.error('[AIQuestionModal] Failed to generate questions:', err);
+      toast.error(err.response?.data?.detail || 'Failed to generate AI questions. Please check your API configuration.');
     } finally {
       setLoading(false);
     }
   };
+
 
 
   const handleClose = () => {
@@ -235,7 +236,7 @@ const AIQuestionModal = ({
                       Generated Questions ({generatedQuestions.length})
                     </h3>
                   </div>
-                  
+
                   <div className="space-y-3 max-h-60 overflow-y-auto">
                     {generatedQuestions.map((question, index) => (
                       <div
@@ -266,7 +267,7 @@ const AIQuestionModal = ({
               >
                 Cancel
               </Button>
-              
+
               {generatedQuestions.length === 0 ? (
                 <Button
                   onClick={handleGenerateQuestions}

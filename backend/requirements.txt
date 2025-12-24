@@ -1,30 +1,94 @@
+# ============================================
+# AI Interview Avatar System - Dependencies
+# ============================================
+# Install with: pip install -r requirements.txt
+
+# Core Framework
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
+starlette==0.27.0
+
+# Database
 sqlalchemy==2.0.23
 aiomysql==0.2.0
 alembic==1.13.1
-python-slugify==8.0.1
+pymysql==1.1.2
+
+# Data Validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Authentication
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
+
+# File Handling
 python-multipart==0.0.6
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
 aiofiles==23.2.1
-python-socketio==5.10.0
+python-dotenv==1.0.0
+
+# HTTP Client (for API calls)
+aiohttp==3.12.15
+httpx==0.28.1
+requests==2.32.5
+
+# ============================================
+# AI & ML Services
+# ============================================
+
+# Google AI (Gemini)
+google-generativeai==0.8.5
+google-api-python-client==2.185.0
+
+# OpenAI (for Whisper & GPT)
+openai==2.6.1
 openai-whisper==20231117
-TTS==0.22.0
+
+# Transformers & ML
 transformers==4.36.0
 torch==2.1.0
 torchaudio==2.1.0
+
+# ============================================
+# Text-to-Speech
+# ============================================
+edge-tts==7.2.7        # Microsoft Edge TTS (FREE, recommended)
+TTS==0.22.0            # Coqui TTS (local)
+gTTS==2.5.4            # Google TTS (backup)
+
+# ============================================
+# Audio Processing
+# ============================================
 librosa==0.10.1
 soundfile==0.12.1
-celery==5.3.4
-redis==5.0.1
-# Resume parsing libraries
+
+# ============================================
+# Resume Parsing
+# ============================================
 PyPDF2==3.0.1
 python-docx==1.1.2
-# OpenAI API for dynamic question generation
-openai==1.12.0
 
+# ============================================
+# WebSocket Support
+# ============================================
+python-socketio==5.10.0
+websockets==15.0.1
+
+# ============================================
+# Background Tasks (Optional)
+# ============================================
+celery==5.3.4
+redis==5.0.1
+
+# ============================================
+# Utilities
+# ============================================
+python-slugify==8.0.1
+python-dateutil==2.9.0.post0
+regex==2025.9.1
+tqdm==4.67.1
+
+# NLP Tools (for question generation)
+nltk==3.9.1
+spacy==3.8.7

@@ -36,6 +36,7 @@ class Question(BaseModel):
     text: str
     tags: List[str] = []
     generated_by: str = "manual"  # manual, ai, template
+    suggested_time_seconds: Optional[int] = 120  # AI-determined time for this question (default 2 min)
 
 class InterviewConfigBase(BaseModel):
     job_role: str

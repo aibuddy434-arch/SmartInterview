@@ -63,7 +63,13 @@ async def get_public_interview(
         "avatar": interview.avatar,
         "voice": interview.voice,
         "number_of_questions": interview.number_of_questions,
-        "questions": [{"id": q.id, "text": q.text, "tags": q.tags, "generated_by": q.generated_by} for q in interview.questions],
+        "questions": [{
+            "id": q.id, 
+            "text": q.text, 
+            "tags": q.tags, 
+            "generated_by": q.generated_by,
+            "suggested_time_seconds": getattr(q, 'suggested_time_seconds', 120) or 120
+        } for q in interview.questions],
         "created_by": interview.created_by,
         "created_at": interview.created_at,
         "updated_at": interview.updated_at,
@@ -180,13 +186,20 @@ async def submit_response(
     session_id: str,
     question_number: int = Form(...), # Number of the question JUST answered (1-based from frontend)
     audio_file: UploadFile = File(...),
+    live_transcript: Optional[str] = Form(None), # NEW: Live transcript from browser as fallback
+    question_text: Optional[str] = Form(None),  # NEW: The actual question text that was asked
+    question_type: Optional[str] = Form("preset"),  # NEW: 'preset', 'follow_up', or 'resume'
     video_file: Optional[UploadFile] = File(None), # Keep video_file if you use it
     db: AsyncSession = Depends(get_db)
 ):
     """
     Submit audio response, transcribe, get AI decision for next step.
+    Uses live_transcript from browser as fallback if audio transcription fails.
     """
     logger.info(f"Received response for session {session_id}, question number {question_number}")
+    if live_transcript:
+        logger.info(f"Received live transcript from browser: {len(live_transcript)} characters")
+    
     session_repository = SessionRepository(db)
     interview_repository = InterviewRepository(db)
     candidate_repository = CandidateRepository(db)
@@ -210,7 +223,7 @@ async def submit_response(
     
     # --- 2. Save and Transcribe Audio ---
     audio_path = None
-    transcript_text = "[Transcription failed]" # Default text
+    transcript_text = None  # Changed from default, we'll set based on best available
     try:
         upload_dir = "uploads/audio"
         os.makedirs(upload_dir, exist_ok=True)
@@ -236,19 +249,40 @@ async def submit_response(
         
         logger.info(f"Audio file saved: {audio_path}")
         
-        logger.info(f"Transcribing audio: {audio_path}")
-        transcription_result = await transcription_service.transcribe_audio(audio_path)
-        transcript_text = transcription_result.get("text", "[Transcription failed or empty]")
-        logger.info(f"Transcription completed: {len(transcript_text)} characters")
+        # --- SPEED OPTIMIZATION: Use live transcript FIRST if available ---
+        # Browser's live transcript is instant, server transcription takes 5-10 seconds
+        if live_transcript and len(live_transcript.strip()) > 5:
+            transcript_text = live_transcript.strip()
+            logger.info(f"Using browser live transcript (fast): {len(transcript_text)} characters")
+        else:
+            # Only do server-side transcription if no live transcript
+            logger.info(f"No live transcript, falling back to server transcription: {audio_path}")
+            transcription_result = await transcription_service.transcribe_audio(audio_path)
+            audio_transcript = transcription_result.get("text", "")
+            
+            # Check if transcription was successful (not empty or failed message)
+            if audio_transcript and not audio_transcript.startswith("[") and len(audio_transcript.strip()) > 5:
+                transcript_text = audio_transcript
+                logger.info(f"Audio transcription successful: {len(transcript_text)} characters")
+            else:
+                logger.warning(f"Audio transcription failed or empty: '{audio_transcript}'")
+                transcript_text = "[No response recorded]"
 
     except Exception as e:
         logger.error(f"Error during audio processing/transcription: {str(e)}")
-        # We'll proceed with the default "Transcription failed" text
+        # Try to use live transcript as last resort
+        if live_transcript and len(live_transcript.strip()) > 5:
+            transcript_text = live_transcript.strip()
+            logger.info(f"Using live transcript after error: {len(transcript_text)} characters")
+        else:
+            transcript_text = "[No response recorded]"
 
     # --- 3. Save Response to DB ---
     response_data = {
         "session_id": session_id,
         "question_number": question_number, # The 1-based number
+        "question_text": question_text,  # NEW: Store actual question text
+        "question_type": question_type or "preset",  # NEW: 'preset', 'follow_up', or 'resume'
         "transcript": transcript_text,
         "audio_path": audio_path,
         "created_at": datetime.utcnow()
@@ -292,17 +326,25 @@ async def submit_response(
     # We pass the 0-based index of the question that was just answered
     current_question_idx = question_number - 1 
     
+    # Calculate elapsed time since interview started
+    elapsed_seconds = 0
+    time_limit_seconds = (interview_config.time_limit or 10) * 60  # Default 10 min in seconds
+    
+    if session.start_time:
+        elapsed_seconds = int((datetime.utcnow() - session.start_time).total_seconds())
+        logger.info(f"Interview elapsed time: {elapsed_seconds}s of {time_limit_seconds}s remaining: {time_limit_seconds - elapsed_seconds}s")
+    
     try:
         logger.info(f"Calling AI service to determine next step... (After Q index {current_question_idx})")
         
-        # --- *** THIS IS THE CORRECTED CALL *** ---
         next_step = await ai_question_service.determine_next_step(
-            interview_config=interview_config, # Pass the full DB object
+            interview_config=interview_config,
             session_history=session_history,
-            current_question_index=current_question_idx, # 0-based index of answered Q
+            current_question_index=current_question_idx,
             candidate_transcript=transcript_text,
-            resume_text=resume_text
-            # 'preset_questions' argument is REMOVED
+            resume_text=resume_text,
+            elapsed_seconds=elapsed_seconds,  # NEW: Pass elapsed time
+            time_limit_seconds=time_limit_seconds  # NEW: Pass time limit
         )
         # --- *** END OF CORRECTION *** ---
         
@@ -356,7 +398,8 @@ async def submit_response(
             data={
                 "action": action,
                 "question_text": question_text,
-                "next_index": next_index # Pass this to frontend
+                "next_index": next_index, # Pass this to frontend
+                "suggested_time_seconds": next_step.get("suggested_time_seconds", 120) # Dynamic timing
             },
             message="Response submitted, next question provided."
         )
@@ -444,22 +487,37 @@ async def public_text_to_speech(
         if not payload.text or not payload.text.strip():
             raise HTTPException(status_code=400, detail="Text cannot be empty")
 
+        logger.info(f"TTS request for text: '{payload.text[:50]}...'")
         audio_file_path = await tts_service.generate_speech(payload.text, payload.voice or "default")
         
         if not audio_file_path or not os.path.exists(audio_file_path):
              logger.error(f"TTS service failed to return valid file path for: {payload.text[:50]}...")
              raise HTTPException(status_code=500, detail="Failed to generate speech file")
 
+        logger.info(f"TTS generated file: {audio_file_path}")
+
         async with aiofiles.open(audio_file_path, 'rb') as f:
              audio_content = await f.read()
+
+        # Detect content type from file extension
+        file_ext = os.path.splitext(audio_file_path)[1].lower()
+        if file_ext == ".mp3":
+            media_type = "audio/mpeg"
+        elif file_ext == ".wav":
+            media_type = "audio/wav"
+        elif file_ext == ".ogg":
+            media_type = "audio/ogg"
+        else:
+            media_type = "audio/mpeg"  # Default for Edge TTS
 
         try:
             os.remove(audio_file_path)
         except OSError:
             logger.warning(f"Could not remove temporary TTS file: {audio_file_path}")
             
-        return Response(content=audio_content, media_type="audio/wav")
+        logger.info(f"TTS returning {len(audio_content)} bytes as {media_type}")
+        return Response(content=audio_content, media_type=media_type)
         
     except Exception as e:
         logger.error(f"Public TTS generation failed: {e}")
-        raise HTTPException(status_code=500, detail="Internal error during speech generation")
+        raise HTTPException(status_code=500, detail=f"TTS Error: {str(e)}")

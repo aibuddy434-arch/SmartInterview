@@ -106,6 +106,8 @@ class Response(Base):
     # This now correctly references the unique session_id string, not the internal primary key
     session_id = Column(String(36), ForeignKey("interview_sessions.session_id"), nullable=False) # <-- CORRECTED
     question_number = Column(Integer, nullable=False)
+    question_text = Column(Text, nullable=True)  # NEW: Store the actual question text
+    question_type = Column(String(50), nullable=True, default="preset")  # NEW: 'preset', 'follow_up', or 'resume'
     transcript = Column(Text, nullable=True)
     audio_path = Column(String(500), nullable=True)
     video_path = Column(String(500), nullable=True)

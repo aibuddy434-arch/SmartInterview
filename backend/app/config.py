@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     transcription_provider: str = "whisper"  # whisper, openai, huggingface
     openai_api_key: Optional[str] = ""
     huggingface_api_key: str = "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"
-    tts_provider: str = "coqui"  # coqui, huggingface
+    tts_provider: str = "edge"  # edge (fast cloud), coqui (slow local), huggingface
 
     google_api_key: Optional[str] = os.getenv("GOOGLE_API_KEY")
+    groq_api_key: Optional[str] = os.getenv("GROQ_API_KEY")
     openai_model_name: str = os.getenv("OPENAI_MODEL_NAME", "gpt-3.5-turbo")
     google_model_name: str = os.getenv("GOOGLE_MODEL_NAME", "gemini-2.0-flash")
     

@@ -101,8 +101,9 @@ const ReportDetail = () => {
 
     const { candidate, interview, session, scores, responses, overall_rating, overall_assessment } = report;
 
-    // Calculate average score
-    const avgScore = scores ? Math.round((scores.communication + scores.technical + scores.confidence + scores.completeness) / 4) : 0;
+    // Calculate average score from all available dimensions (handles both 4 and 6 dimension scoring)
+    const scoreValues = scores ? Object.values(scores).filter(v => typeof v === 'number' && !isNaN(v)) : [];
+    const avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length) : 0;
 
     return (
         <div className="space-y-6 pb-12">
@@ -211,25 +212,74 @@ const ReportDetail = () => {
                                         <span className="text-sm">{candidate?.phone}</span>
                                     </div>
                                 )}
-                                {candidate?.resume_path && (
-                                    <div className="flex items-center text-gray-600 mt-2 pt-2 border-t">
-                                        <FileText className="h-4 w-4 mr-3 text-purple-500" />
+                            </div>
+                        </CardBody>
+                    </Card>
+
+                    {/* Resume Display Card - NEW */}
+                    {candidate?.resume_path && (
+                        <Card>
+                            <CardHeader>
+                                <h2 className="text-lg font-semibold flex items-center">
+                                    <FileText className="h-5 w-5 mr-2 text-purple-500" />
+                                    Candidate Resume
+                                </h2>
+                            </CardHeader>
+                            <CardBody>
+                                <div className="space-y-3">
+                                    {/* Embedded PDF Viewer */}
+                                    <div className="w-full h-64 border rounded-lg overflow-hidden bg-gray-50">
+                                        <iframe
+                                            src={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/${candidate.resume_path}#toolbar=0`}
+                                            className="w-full h-full"
+                                            title="Candidate Resume"
+                                            onError={(e) => {
+                                                e.target.style.display = 'none';
+                                            }}
+                                        />
+                                    </div>
+
+                                    {/* Download/View Link */}
+                                    <div className="flex items-center justify-center pt-2 border-t">
                                         <a
                                             href={`${process.env.REACT_APP_API_URL || 'http://localhost:8000'}/${candidate.resume_path}`}
                                             target="_blank"
                                             rel="noopener noreferrer"
-                                            className="text-sm text-blue-600 hover:text-blue-800 hover:underline flex items-center"
+                                            className="inline-flex items-center px-4 py-2 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors text-sm font-medium"
                                         >
-                                            View Resume
-                                            <svg className="h-3 w-3 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <FileText className="h-4 w-4 mr-2" />
+                                            Open Full Resume
+                                            <svg className="h-3 w-3 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                                             </svg>
                                         </a>
                                     </div>
-                                )}
-                            </div>
-                        </CardBody>
-                    </Card>
+                                </div>
+                            </CardBody>
+                        </Card>
+                    )}
+
+                    {/* Candidate Mastery Section - NEW */}
+                    {overall_assessment?.candidate_mastery && overall_assessment.candidate_mastery.length > 0 && (
+                        <Card>
+                            <CardHeader>
+                                <h2 className="text-lg font-semibold flex items-center">
+                                    <Award className="h-5 w-5 mr-2 text-yellow-500" />
+                                    Candidate's Top Skills
+                                </h2>
+                            </CardHeader>
+                            <CardBody>
+                                <ul className="space-y-2">
+                                    {overall_assessment.candidate_mastery.map((skill, i) => (
+                                        <li key={i} className="flex items-center text-gray-700 bg-gradient-to-r from-yellow-50 to-orange-50 p-3 rounded-lg border border-yellow-200">
+                                            <Star className="h-5 w-5 text-yellow-500 mr-3 flex-shrink-0" />
+                                            <span className="font-medium">{skill}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </CardBody>
+                        </Card>
+                    )}
 
                     {/* Strengths & Improvements */}
                     {overall_assessment && (
@@ -334,7 +384,7 @@ const ReportDetail = () => {
                             </h2>
                         </CardHeader>
                         <CardBody>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                                 {/* Communication Score */}
                                 <div className="text-center p-4 bg-blue-50 rounded-lg">
                                     <MessageSquare className="h-8 w-8 text-blue-500 mx-auto mb-2" />
@@ -353,6 +403,15 @@ const ReportDetail = () => {
                                     </p>
                                 </div>
 
+                                {/* Problem Solving Score */}
+                                <div className="text-center p-4 bg-indigo-50 rounded-lg">
+                                    <Lightbulb className="h-8 w-8 text-indigo-500 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-500">Problem Solving</p>
+                                    <p className={`text-2xl font-bold ${reportService.getScoreColor(scores?.problem_solving)}`}>
+                                        {Math.round(scores?.problem_solving || 0)}%
+                                    </p>
+                                </div>
+
                                 {/* Confidence Score */}
                                 <div className="text-center p-4 bg-green-50 rounded-lg">
                                     <TrendingUp className="h-8 w-8 text-green-500 mx-auto mb-2" />
@@ -362,12 +421,21 @@ const ReportDetail = () => {
                                     </p>
                                 </div>
 
-                                {/* Completeness Score */}
+                                {/* Relevance Score */}
+                                <div className="text-center p-4 bg-teal-50 rounded-lg">
+                                    <Briefcase className="h-8 w-8 text-teal-500 mx-auto mb-2" />
+                                    <p className="text-sm text-gray-500">Relevance</p>
+                                    <p className={`text-2xl font-bold ${reportService.getScoreColor(scores?.relevance)}`}>
+                                        {Math.round(scores?.relevance || 0)}%
+                                    </p>
+                                </div>
+
+                                {/* Depth Score */}
                                 <div className="text-center p-4 bg-orange-50 rounded-lg">
                                     <CheckCircle className="h-8 w-8 text-orange-500 mx-auto mb-2" />
-                                    <p className="text-sm text-gray-500">Completeness</p>
-                                    <p className={`text-2xl font-bold ${reportService.getScoreColor(scores?.completeness)}`}>
-                                        {Math.round(scores?.completeness || 0)}%
+                                    <p className="text-sm text-gray-500">Depth</p>
+                                    <p className={`text-2xl font-bold ${reportService.getScoreColor(scores?.depth)}`}>
+                                        {Math.round(scores?.depth || 0)}%
                                     </p>
                                 </div>
                             </div>
@@ -407,23 +475,39 @@ const ReportDetail = () => {
                                 responses.map((response, index) => (
                                     <div key={index} className="border rounded-lg overflow-hidden">
                                         {/* Question Header */}
-                                        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 border-b">
+                                        <div className={`p-4 border-b ${response.question_type === 'follow_up'
+                                                ? 'bg-gradient-to-r from-purple-50 to-indigo-50'
+                                                : response.question_type === 'resume'
+                                                    ? 'bg-gradient-to-r from-green-50 to-teal-50'
+                                                    : 'bg-gradient-to-r from-blue-50 to-indigo-50'
+                                            }`}>
                                             <div className="flex items-start justify-between">
                                                 <div className="flex items-start">
-                                                    <span className="inline-flex items-center justify-center h-8 w-8 rounded-full bg-blue-600 text-white font-semibold text-sm mr-3 flex-shrink-0">
-                                                        Q{response.question_number}
+                                                    <span className={`inline-flex items-center justify-center h-8 px-3 rounded-full text-white font-semibold text-sm mr-3 flex-shrink-0 ${response.question_type === 'follow_up'
+                                                            ? 'bg-purple-600'
+                                                            : response.question_type === 'resume'
+                                                                ? 'bg-green-600'
+                                                                : 'bg-blue-600'
+                                                        }`}>
+                                                        {response.display_label || `Q${response.question_number}`}
                                                     </span>
                                                     <div>
                                                         <p className="font-medium text-gray-900">{response.question_text || `Question ${response.question_number}`}</p>
-                                                        {response.question_tags && response.question_tags.length > 0 && (
-                                                            <div className="flex flex-wrap gap-1 mt-2">
-                                                                {response.question_tags.map((tag, i) => (
-                                                                    <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
-                                                                        {tag}
-                                                                    </span>
-                                                                ))}
-                                                            </div>
-                                                        )}
+                                                        <div className="flex flex-wrap gap-1 mt-2">
+                                                            {response.question_type && response.question_type !== 'preset' && (
+                                                                <span className={`px-2 py-0.5 text-xs rounded-full ${response.question_type === 'follow_up'
+                                                                        ? 'bg-purple-100 text-purple-700'
+                                                                        : 'bg-green-100 text-green-700'
+                                                                    }`}>
+                                                                    {response.question_type === 'follow_up' ? '🔄 Follow-up' : '📄 Resume'}
+                                                                </span>
+                                                            )}
+                                                            {response.question_tags && response.question_tags.length > 0 && response.question_tags.map((tag, i) => (
+                                                                <span key={i} className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs rounded-full">
+                                                                    {tag}
+                                                                </span>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 </div>
                                                 <span className={`px-3 py-1 rounded-full text-xs font-medium border ${getQualityBadge(response.answer_quality)}`}>
